@@ -102,7 +102,7 @@ export const getBooksByCategory = async (req, res) => {
                 .status(400)
                 .json({ message: "Le nom de la catégorie est requis." });
         }
-        const books = await bookModel.findBooksByCategoryName(categoryName);
+        const books = await bookModel.findBooksByCategoryByCategoryName(categoryName);
         if (books.length === 0) {
             return res
                 .status(404)
@@ -259,9 +259,9 @@ export const searchBooks = async (req, res) => {
     }
 };
 /**
- * Gère la requête pour supprimer un livre spécifique par son ID.
- * @param {object} req - L'objet requête Express. Contient req.params.bookId.
- * @param {object} res - L'objet réponse Express.
+ * Supprime un livre de la base de données par son ID.
+ * @param {string} bookId - L'ID UUID du livre à supprimer.
+ * @returns {Promise<number>} Le nombre de lignes supprimées (0 si non trouvé, 1 si supprimé).
  */
 export const deleteBook = async (req, res) => {
     const { bookId } = req.params; // L'ID du livre à supprimer (depuis l'URL)
@@ -294,19 +294,51 @@ export const deleteBook = async (req, res) => {
             message: "Erreur interne du serveur lors de la suppression du livre.",
         });
     }
-};// ... autres fonctions de contrôleur qui appellent des fonctions du modèle
-
+};
+// Tu pourrais ajouter ici d'autres fonctions comme findBookById, updateBook, deleteBook, etc.
 /**
- * Permet à un utilisateur authentifié de poster un commentaire sur un livre.
- * @param {object} req - L'objet requête Express. Doit contenir bookId et commentText dans le corps, et req.user du JWT.
- * @param {object} res - L'objet réponse Express.
+ * Compte le nombre de likes pour un livre donné.
+ * @param {string} bookId - L'ID UUID du livre.
+ * @returns {Promise<number>} Le nombre de likes pour ce livre.
  */
-// controllers/bookController.js
-
+export const countLikesForBook = async (bookId) => {
+    try {
+        const result = await pool.query(
+            `SELECT COUNT(*) FROM booklikes WHERE book_id = $1;`,
+            [bookId]
+        );
+        return parseInt(result.rows[0].count, 10);
+    } catch (error) {
+        console.error("Erreur dans bookModel.countLikesForBook:", error.message);
+        throw error;
+    }
+};
+/**
+ * Ajoute un commentaire pour un livre par un utilisateur.
+ * @param {string} bookId - L'ID UUID du livre commenté.
+ * @param {string} userId - L'ID UUID de l'utilisateur qui commente.
+ * @param {string} commentText - Le texte du commentaire.
+ * @returns {Promise<object>} L'entrée BookComment créée.
+ */
+export const addBookComment = async (bookId, userId, commentText) => {
+    try {
+        const result = await pool.query(
+            `INSERT INTO bookcomments (book_id, user_id, comment_text)
+             VALUES ($1, $2, $3)
+             RETURNING comment_id, book_id, user_id, comment_text, publication_date;`,
+            [bookId, userId, commentText]
+        );
+        return result.rows[0];
+    } catch (error) {
+        console.error("Erreur dans bookModel.addBookComment:", error.message);
+        throw error;
+    }
+};
 export const postBookComment = async (req, res) => {
+    console.log("Executing postBookComment..."); // Added for debugging
     const userId = req.user.userId; // Vient du token JWT via le middleware authenticateToken
-    const { bookId } = req.params;  // <-- L'ID du livre doit venir des paramètres de l'URL
-    const { commentText } = req.body; // <-- Le texte du commentaire vient du corps JSON
+    const { bookId } = req.params;  // L'ID du livre doit venir des paramètres de l'URL
+    const { commentText } = req.body; // Le texte du commentaire vient du corps JSON
 
     try {
         if (!bookId || !commentText || !userId) {
@@ -350,9 +382,37 @@ export const postBookComment = async (req, res) => {
 };
 
 /**
- * Gère la requête pour récupérer toutes les catégories de livres.
- * @param {object} req - L'objet requête Express.
- * @param {object} res - L'objet réponse Express.
+ * Récupère tous les commentaires pour un livre donné, avec les infos de l'utilisateur.
+ * @param {string} bookId - L'ID UUID du livre.
+ * @returns {Promise<Array>} Un tableau d'objets commentaire.
+ */
+export const getCommentsForBook = async (bookId) => {
+    try {
+        const result = await pool.query(
+            `SELECT
+                bc.comment_id,
+                bc.comment_text,
+                bc.publication_date,
+                u.user_id,
+                u.first_name,
+                u.last_name,
+                u.email
+             FROM bookcomments bc
+             JOIN Users u ON bc.user_id = u.user_id
+             WHERE bc.book_id = $1
+             ORDER BY bc.publication_date DESC;`, // Ordre chronologique, du plus récent au plus ancien
+            [bookId]
+        );
+        return result.rows;
+    } catch (error) {
+        console.error("Erreur dans bookModel.getCommentsForBook:", error.message);
+        throw error;
+    }
+};
+
+/**
+ * Récupère toutes les catégories de livres de la base de données.
+ * @returns {Promise<Array>} Un tableau de toutes les catégories.
  */
 export const getAllCategories = async (req, res) => {
     try {
@@ -363,5 +423,28 @@ export const getAllCategories = async (req, res) => {
         res.status(500).json({
             message: "Erreur interne du serveur lors de la récupération des catégories.",
         });
+    }
+};
+
+/**
+ * Gère la requête pour créer une nouvelle catégorie.
+ * @param {object} req - L'objet requête Express. Contient req.body avec category_name, category_description, category_icon.
+ * @param {object} res - L'objet réponse Express.
+ */
+export const createCategory = async (req, res) => {
+    console.log("Attempting to create category..."); // Added for debugging
+    const { category_name, category_description, category_icon } = req.body;
+    try {
+        if (!category_name) {
+            return res.status(400).json({ message: "Le nom de la catégorie est obligatoire." });
+        }
+        const newCategory = await bookModel.insertCategory({ category_name, category_description, category_icon });
+        res.status(201).json(newCategory);
+    } catch (error) {
+        console.error("Erreur dans le contrôleur createCategory :", error.message);
+        if (error.code === '23505') { // Unique violation
+            return res.status(409).json({ message: "Une catégorie avec ce nom existe déjà." });
+        }
+        res.status(500).json({ message: "Erreur interne du serveur lors de la création de la catégorie." });
     }
 };

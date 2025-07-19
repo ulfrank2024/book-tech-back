@@ -9,7 +9,8 @@ import {
     searchBooks,
     deleteBook,
     postBookComment,
-    getAllCategories
+    getAllCategories,
+    createCategory
 } from "../controllers/bookController.js";
 import { registerUser } from "../controllers/userController.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
@@ -21,6 +22,7 @@ router.get("/category/:categoryName", getBooksByCategory); // GET /api/books/cat
 router.post("/", createBook); // POST /api/books (pour créer)
 router.get("/", getAllBooks); // GET /api/books (pour tous les livres)
 router.get("/categories", getAllCategories); // GET /api/books/categories (pour toutes les catégories)
+router.post("/categories", createCategory); // POST /api/books/categories (pour créer une catégorie)
 // Routes avec ID paramétré (moins spécifiques que celles au-dessus)
 router.get("/:bookId", getBookDetails); // GET /api/books/:bookId (pour les détails d'un seul livre)
 router.put("/:bookId", updateBook); // PUT /api/books/:bookId (pour modifier un livre)

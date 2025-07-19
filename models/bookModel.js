@@ -35,17 +35,17 @@ export const insertBook = async (bookData) => {
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *;`,
             [
-                title,
-                author_name,
+                JSON.stringify(title),
+                JSON.stringify(author_name),
                 category_id,
                 price,
-                description,
+                JSON.stringify(description),
                 cover_image_url,
                 book_file_url,
-                availability,
-                rating,
-                format,
-                file_size_mb,
+                JSON.stringify(availability),
+                JSON.stringify(rating),
+                JSON.stringify(format),
+                JSON.stringify(file_size_mb),
             ]
         );
         return result.rows[0]; 
@@ -294,6 +294,30 @@ export const findAllCategories = async () => {
         return result.rows;
     } catch (error) {
         console.error("Erreur dans bookModel.findAllCategories:", error.message);
+        throw error;
+    }
+};
+
+/**
+ * Insère une nouvelle catégorie de livre dans la base de données.
+ * @param {object} categoryData - Un objet contenant les données de la catégorie à insérer.
+ * @param {string} categoryData.category_name - Le nom de la catégorie (obligatoire).
+ * @param {string} [categoryData.category_description] - La description de la catégorie (optionnel).
+ * @param {string} [categoryData.category_icon] - L'icône de la catégorie (optionnel).
+ * @returns {Promise<object>} La catégorie insérée avec son ID généré.
+ */
+export const insertCategory = async (categoryData) => {
+    const { category_name, category_description, category_icon } = categoryData;
+    try {
+        const result = await pool.query(
+            `INSERT INTO BookCategories (category_name, category_description, category_icon)
+             VALUES ($1, $2, $3)
+             RETURNING *;`,
+            [JSON.stringify(category_name), JSON.stringify(category_description), category_icon]
+        );
+        return result.rows[0];
+    } catch (error) {
+        console.error("Erreur dans bookModel.insertCategory:", error.message);
         throw error;
     }
 };
