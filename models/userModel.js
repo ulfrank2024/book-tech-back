@@ -1,4 +1,3 @@
-// models/userModel.js
 import pool from "../db/db.js";
 
 /**
@@ -117,6 +116,91 @@ export const findRoleById = async (roleId) => {
 };
 
 /**
+ * Met à jour le jeton de réinitialisation de mot de passe et son expiration pour un utilisateur.
+ * @param {string} userId - L'ID de l'utilisateur.
+ * @param {string} token - Le jeton de réinitialisation.
+ * @param {Date} expires - La date d'expiration du jeton.
+ * @returns {Promise<object>} L'utilisateur mis à jour.
+ */
+export const updateUserPasswordResetToken = async (userId, token, expires) => {
+    try {
+        const result = await pool.query(
+            `UPDATE Users
+             SET password_reset_token = $1, password_reset_expires = TO_TIMESTAMP($2 / 1000)
+             WHERE user_id = $3
+             RETURNING *;`,
+            [token, expires, userId]
+        );
+        return result.rows[0];
+    } catch (error) {
+        console.error("Erreur dans userModel.updateUserPasswordResetToken:", error.message);
+        throw error;
+    }
+};
+
+/**
+ * Trouve un utilisateur par son jeton de réinitialisation de mot de passe.
+ * @param {string} token - Le jeton de réinitialisation.
+ * @returns {Promise<object | undefined>} L'utilisateur trouvé, ou undefined si non trouvé ou expiré.
+ */
+export const findUserByPasswordResetToken = async (token) => {
+    try {
+        const result = await pool.query(
+            `SELECT * FROM Users
+             WHERE password_reset_token = $1 AND password_reset_expires > NOW();`,
+            [token]
+        );
+        return result.rows[0];
+    } catch (error) {
+        console.error("Erreur dans userModel.findUserByPasswordResetToken:", error.message);
+        throw error;
+    }
+};
+
+/**
+ * Met à jour le mot de passe haché d'un utilisateur.
+ * @param {string} userId - L'ID de l'utilisateur.
+ * @param {string} passwordHash - Le nouveau mot de passe haché.
+ * @returns {Promise<object>} L'utilisateur mis à jour.
+ */
+export const updateUserPassword = async (userId, passwordHash) => {
+    try {
+        const result = await pool.query(
+            `UPDATE Users
+             SET password_hash = $1
+             WHERE user_id = $2
+             RETURNING *;`,
+            [passwordHash, userId]
+        );
+        return result.rows[0];
+    } catch (error) {
+        console.error("Erreur dans userModel.updateUserPassword:", error.message);
+        throw error;
+    }
+};
+
+/**
+ * Efface le jeton de réinitialisation de mot de passe et son expiration pour un utilisateur.
+ * @param {string} userId - L'ID de l'utilisateur.
+ * @returns {Promise<object>} L'utilisateur mis à jour.
+ */
+export const clearUserPasswordResetToken = async (userId) => {
+    try {
+        const result = await pool.query(
+            `UPDATE Users
+             SET password_reset_token = NULL, password_reset_expires = NULL
+             WHERE user_id = $1
+             RETURNING *;`,
+            [userId]
+        );
+        return result.rows[0];
+    } catch (error) {
+        console.error("Erreur dans userModel.clearUserPasswordResetToken:", error.message);
+        throw error;
+    }
+};
+
+/**
  * Récupère tous les livres associés à un utilisateur donné.
  * @param {string} userId - L'ID UUID de l'utilisateur.
  * @returns {Promise<Array>} Un tableau d'objets livre.
@@ -205,4 +289,98 @@ export const countUserTotalLikes = async (userId) => {
         throw error;
     }
 };
-// Tu peux ajouter d'autres fonctions pour les utilisateurs ici (findUserByEmail, findUserById, etc.)
+
+/**
+ * Récupère tous les livres favoris d'un utilisateur donné.
+ * @param {string} userId - L'ID UUID de l'utilisateur.
+ * @returns {Promise<Array>} Un tableau d'objets livre favoris.
+ */
+export const findFavoriteBooksByUserId = async (userId) => {
+    try {
+        const result = await pool.query(
+            `SELECT
+                b.book_id,
+                b.title,
+                b.author_name,
+                b.cover_image_url,
+                b.price
+             FROM booklikes bl
+             JOIN Books b ON bl.book_id = b.book_id
+             WHERE bl.user_id = $1
+             ORDER BY bl.liked_at DESC;`,
+            [userId]
+        );
+        return result.rows;
+    } catch (error) {
+        console.error("Erreur dans userModel.findFavoriteBooksByUserId:", error.message);
+        throw error;
+    }
+};
+
+/**
+ * Récupère toutes les commandes d'un utilisateur donné avec les détails des articles.
+ * @param {string} userId - L'ID UUID de l'utilisateur.
+ * @returns {Promise<Array>} Un tableau d'objets commande avec les articles.
+ */
+export const findOrdersByUserId = async (userId) => {
+    try {
+        const ordersResult = await pool.query(
+            `SELECT
+                o.order_id,
+                o.order_date,
+                o.total_amount,
+                o.status
+             FROM Orders o
+             WHERE o.user_id = $1
+             ORDER BY o.order_date DESC;`,
+            [userId]
+        );
+
+        // Pour chaque commande, récupérer les articles associés
+        for (let order of ordersResult.rows) {
+            const itemsResult = await pool.query(
+                `SELECT
+                    oi.quantity,
+                    oi.price_at_purchase,
+                    b.title,
+                    b.author_name,
+                    b.cover_image_url
+                 FROM OrderItems oi
+                 JOIN Books b ON oi.book_id = b.book_id
+                 WHERE oi.order_id = $1;`,
+                [order.order_id]
+            );
+            order.items = itemsResult.rows;
+        }
+
+        return ordersResult.rows;
+    } catch (error) {
+        console.error("Erreur dans userModel.findOrdersByUserId:", error.message);
+        throw error;
+    }
+};
+
+/**
+ * Récupère toutes les citations aimées par un utilisateur donné.
+ * @param {string} userId - L'ID UUID de l'utilisateur.
+ * @returns {Promise<Array>} Un tableau d'objets citation aimées.
+ */
+export const findLikedQuotesByUserId = async (userId) => {
+    try {
+        const result = await pool.query(
+            `SELECT
+                q.quote_id,
+                q.quote_text,
+                q.author_name
+             FROM quotelikes ql
+             JOIN Quotes q ON ql.quote_id = q.quote_id
+             WHERE ql.user_id = $1
+             ORDER BY ql.liked_at DESC;`,
+            [userId]
+        );
+        return result.rows;
+    } catch (error) {
+        console.error("Erreur dans userModel.findLikedQuotesByUserId:", error.message);
+        throw error;
+    }
+};

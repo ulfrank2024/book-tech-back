@@ -1,7 +1,8 @@
-// controllers/userController.js
 import * as userModel from "../models/userModel.js";
+import { getOrCreateCart, getCartItemsByCartId } from '../models/cartModel.js';
 import bcrypt from "bcrypt"; 
 import jwt from "jsonwebtoken";
+import crypto from "crypto"; // Import crypto for token generation
 
 /**
  * Crée un nouveau compte utilisateur.
@@ -151,6 +152,75 @@ export const loginUser = async (req, res) => {
         res.status(500).json({ message: "Erreur interne du serveur lors de la tentative de connexion." });
     }
 };
+
+/**
+ * Gère la demande de réinitialisation de mot de passe.
+ * Génère un jeton, le stocke et envoie un e-mail à l'utilisateur.
+ * @param {object} req - L'objet requête Express (doit contenir email dans le corps).
+ * @param {object} res - L'objet réponse Express.
+ */
+export const forgotPassword = async (req, res) => {
+    const { email } = req.body;
+
+    try {
+        const user = await userModel.findUserByEmail(email);
+        if (!user) {
+            // Pour des raisons de sécurité, toujours renvoyer un succès même si l'email n'existe pas.
+            return res.status(200).json({ message: "Si l'email existe, un lien de réinitialisation a été envoyé." });
+        }
+
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const passwordResetExpires = Date.now() + 3600000; // 1 heure
+
+        await userModel.updateUserPasswordResetToken(user.user_id, resetToken, passwordResetExpires);
+
+        // TODO: Envoyer l'e-mail avec le lien de réinitialisation
+        // Le lien devrait ressembler à: `http://localhost:3000/reset-password/${resetToken}`
+        console.log(`Lien de réinitialisation: http://localhost:3000/reset-password/${resetToken}`);
+        // Ici, vous intégreriez un service d'envoi d'e-mails (ex: Nodemailer)
+
+        res.status(200).json({ message: "Si l'email existe, un lien de réinitialisation a été envoyé." });
+
+    } catch (error) {
+        console.error("Erreur lors de la demande de réinitialisation de mot de passe:", error.message);
+        res.status(500).json({ message: "Erreur interne du serveur lors de la demande de réinitialisation." });
+    }
+};
+
+/**
+ * Réinitialise le mot de passe de l'utilisateur en utilisant un jeton.
+ * @param {object} req - L'objet requête Express (doit contenir resetToken dans les params et newPassword dans le corps).
+ * @param {object} res - L'objet réponse Express.
+ */
+export const resetPassword = async (req, res) => {
+    const { resetToken } = req.params;
+    const { newPassword } = req.body;
+
+    try {
+        if (!newPassword || newPassword.length < 6) {
+            return res.status(400).json({ message: "Le nouveau mot de passe doit contenir au moins 6 caractères." });
+        }
+
+        const user = await userModel.findUserByPasswordResetToken(resetToken);
+
+        if (!user || user.password_reset_expires < Date.now()) {
+            return res.status(400).json({ message: "Jeton de réinitialisation invalide ou expiré." });
+        }
+
+        const saltRounds = 10;
+        const password_hash = await bcrypt.hash(newPassword, saltRounds);
+
+        await userModel.updateUserPassword(user.user_id, password_hash);
+        await userModel.clearUserPasswordResetToken(user.user_id); // Nettoyer le jeton après utilisation
+
+        res.status(200).json({ message: "Mot de passe réinitialisé avec succès." });
+
+    } catch (error) {
+        console.error("Erreur lors de la réinitialisation du mot de passe:", error.message);
+        res.status(500).json({ message: "Erreur interne du serveur lors de la réinitialisation du mot de passe." });
+    }
+};
+
 /**
  * Affiche le profil de l'utilisateur actuellement authentifié et ses livres associés.
  * @param {object} req - L'objet requête Express (doit avoir req.user attaché par le middleware d'auth).
@@ -167,19 +237,38 @@ export const getUserProfile = async (req, res) => {
         if (!user) {
             return res.status(404).json({ message: "Profil utilisateur non trouvé." });
         }
-        // 2. Récupérer les livres associés à cet utilisateur
-        const userBooks = await userModel.findBooksByUserId(userId);
-        // 3. Renvoyer toutes les informations combinées
+
+        // 2. Récupérer les livres achetés par cet utilisateur
+        const purchases = await userModel.findBooksByUserId(userId);
+
+        // 3. Récupérer les livres favoris de l'utilisateur
+        const favorites = await userModel.findFavoriteBooksByUserId(userId);
+
+        // 4. Récupérer les articles du panier de l'utilisateur
+        const cart = await getOrCreateCart(userId);
+        const cartItems = await getCartItemsByCartId(cart.cart_id);
+
+        // 5. Récupérer les citations aimées par l'utilisateur
+        const quotes = await userModel.findLikedQuotesByUserId(userId);
+
+        // 6. Récupérer l'historique des commandes de l'utilisateur
+        const orderHistory = await userModel.findOrdersByUserId(userId);
+
+        // 7. Renvoyer toutes les informations combinées
         res.status(200).json({
-            message: "Profil utilisateur et livres récupérés avec succès.",
+            message: "Profil utilisateur et données associées récupérés avec succès.",
             user: {
-                ...user, 
-                books: userBooks 
+                ...user,
+                purchases,
+                favorites,
+                cartItems,
+                quotes,
+                orderHistory
             }
         });
     } catch (error) {
         console.error("Erreur dans le contrôleur getUserProfile:", error.message);
-        res.status(500).json({ message: "Erreur interne du serveur lors de la récupération du profil et des livres." });
+        res.status(500).json({ message: "Erreur interne du serveur lors de la récupération du profil et des données associées." });
     }
 };
 
@@ -206,7 +295,7 @@ export const purchaseBook = async (req, res) => {
 
         // 2. Vérifier si le livre existe réellement (optionnel mais recommandé pour la robustesse)
         // Pour cela, tu aurais besoin d'une fonction findBookById dans bookModel.js
-        // import * as bookModel from '../models/bookModel.js';
+        // import * => as bookModel from '../models/bookModel.js';
         // const bookExists = await bookModel.findBookById(bookId);
         // if (!bookExists) {
         //     return res.status(404).json({ message: "Livre non trouvé." });

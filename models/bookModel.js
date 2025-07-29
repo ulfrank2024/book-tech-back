@@ -78,9 +78,9 @@ export const findBooksByCategoryName = async (categoryName) => {
              b.* , bc.category_name
              FROM Books b
              JOIN BookCategories bc ON b.category_id = bc.category_id
-             WHERE bc.category_name ILIKE $1
+             WHERE (bc.category_name->>'en' ILIKE $1 OR bc.category_name->>'fr' ILIKE $1)
              ORDER BY b.title ASC;`,
-            [categoryName]
+            [`%${categoryName}%`]
         );
         return result.rows;
     } catch (error) {

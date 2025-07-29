@@ -102,7 +102,7 @@ export const getBooksByCategory = async (req, res) => {
                 .status(400)
                 .json({ message: "Le nom de la catégorie est requis." });
         }
-        const books = await bookModel.findBooksByCategoryByCategoryName(categoryName);
+        const books = await bookModel.findBooksByCategoryName(categoryName);
         if (books.length === 0) {
             return res
                 .status(404)
